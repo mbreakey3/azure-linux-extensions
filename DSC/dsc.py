@@ -56,7 +56,7 @@ dsc_release = 294
 package_pattern = '(\d+).(\d+).(\d+).(\d+)'
 nodeid_path = '/etc/opt/omi/conf/dsc/agentid'
 date_time_format = "%Y-%m-%dT%H:%M:%SZ"
-extension_handler_version = "2.70.0.12"
+extension_handler_version = "2.70.0.13"
 
 # Error codes
 UnsupportedDistro = 51 #excludes from SLA
@@ -106,7 +106,7 @@ def main():
 
     global distro_category
     distro_category = get_distro_category()
-    check_supported_OS()
+    check_unsupported_OS()
 
     for a in sys.argv[1:]:
         if re.match("^([-/]*)(disable)", a):
@@ -131,60 +131,55 @@ def get_distro_category():
     elif distro_name == 'suse':
         return DistroCategory.suse 
     waagent.AddExtensionEvent(name=ExtensionShortName, op='InstallInProgress', isSuccess=True, message="Unsupported distro :" + distro_name + "; distro_version: " + distro_version)
-    hutil.do_exit(UnsupportedDistro, 'Install', 'error', str(UnsupportedDistro), distro_name + 'is not supported.')
+    hutil.do_exit(UnsupportedDistro, 'Install', 'error', str(UnsupportedDistro), distro_name + ' is not supported.')
     
-def check_supported_OS():
+def check_unsupported_OS():
     """
-    Checks if the VM this extension is running on is supported by DSC
-    Returns for platform.linux_distribution() vary widely in format, such as
-    '7.3.1611' returned for a VM with CentOS 7, so the first provided
-    digits must match.
-    All other distros not supported will get error code 51
+    Checks if the VM this extension is running on is unsupported by DSC
+    if so, it will exit with error code 51
     """
-    supported_dists = {'redhat' : ['6', '7'], # CentOS
-                       'centos' : ['6', '7'], # CentOS
-                       'red hat' : ['6', '7'], # Redhat
-                       'debian' : ['8'], # Debian
-                       'ubuntu' : ['14.04', '16.04'], # Ubuntu
-                       'suse' : ['11', '12'], #SLES
-                       'opensuse' : ['13', '42.3'] #OpenSuse
+    unsupported_dists = {
+        'debian' : ['9'], # Debian
+        'ubuntu' : ['18'], # Ubuntu
+        'suse' : ['15'], #SLES
     }
-    vm_supported = False
+    vm_supported = True
 
     try:
         vm_dist, vm_ver, vm_id = platform.linux_distribution()
     except AttributeError:
         vm_dist, vm_ver, vm_id = platform.dist()
 
-    # Find this VM distribution in the supported list
-    for supported_dist in supported_dists.keys():
-        if vm_dist.lower().startswith(supported_dist):
-            # Check if this VM distribution version is supported
+    # Find this VM distribution in the unsupported list
+    for unsupported_dist in unsupported_dists.keys():
+        if vm_dist.lower().startswith(unsupported_dist):
+            # Check if this VM distribution version is unsupported
             vm_ver_split = vm_ver.split('.')
-            for supported_ver in supported_dists[supported_dist]:
-                supported_ver_split = supported_ver.split('.')
+            for unsupported_ver in unsupported_dists[unsupported_dist]:
+                unsupported_ver_split = unsupported_ver.split('.')
 
                 # If vm_ver is at least as precise (at least as many digits) as
-                # supported_ver and matches all the supported_ver digits, then
-                # this VM is supported
+                # unsupported_ver and matches all the unsupported_ver digits, then
+                # this VM is unsupported
                 vm_ver_match = True
-                for idx, supported_ver_num in enumerate(supported_ver_split):
+                for idx, unsupported_ver_num in enumerate(unsupported_ver_split):
                     try:
-                        supported_ver_num = int(supported_ver_num)
+                        unsupported_ver_num = int(unsupported_ver_num)
                         vm_ver_num = int(vm_ver_split[idx])
                     except IndexError:
                         vm_ver_match = False
                         break
-                    if vm_ver_num is not supported_ver_num:
+                    if vm_ver_num is not unsupported_ver_num:
                         vm_ver_match = False
                         break
                 if vm_ver_match:
-                    vm_supported = True
+                    vm_supported = False
                     break
 
     if not vm_supported:
-        waagent.AddExtensionEvent(name=ExtensionShortName, op='InstallInProgress', isSuccess=True, message="Unsupported OS :" + vm_dist + "; distro_version: " + vm_ver)
-        hutil.do_exit(UnsupportedDistro, 'Install', 'error', str(UnsupportedDistro), vm_dist + "; distro_version: " + vm_ver + ' is not supported.')
+        error_string = "Distro: {0} Version: {1} is not supported.".format(vm_dist, vm_ver)
+        waagent.AddExtensionEvent(name=ExtensionShortName, op='InstallInProgress', isSuccess=True, message=error_string)
+        hutil.do_exit(UnsupportedDistro, 'Install', 'error', str(UnsupportedDistro), error_string)
 
 def install():
     hutil.do_parse_context('Install')
@@ -192,12 +187,12 @@ def install():
         waagent.AddExtensionEvent(name=ExtensionShortName, op='InstallInProgress', isSuccess=True, message="Installing DSCForLinux extension")
         remove_old_dsc_packages()
         install_dsc_packages()
-        waagent.AddExtensionEvent(name=ExtensionShortName, op='InstallInProgress', isSuccess=True, message="successfully installed DSCForLinux extension")
+        waagent.AddExtensionEvent(name=ExtensionShortName, op='InstallInProgress', isSuccess=True, message="Successfully installed DSCForLinux extension")
         hutil.do_exit(0, 'Install', 'success', '0', 'Install Succeeded.')
     except Exception as e:
-        waagent.AddExtensionEvent(name=ExtensionShortName, op='InstallInProgress', isSuccess=True, message="failed to install DSC extension with error: {0} and stacktrace: {1}".format(str(e), traceback.format_exc()))
+        waagent.AddExtensionEvent(name=ExtensionShortName, op='InstallInProgress', isSuccess=True, message="Failed to install DSC extension with error: {0} and stacktrace: {1}".format(str(e), traceback.format_exc()))
         hutil.error("Failed to install DSC extension with error: %s, stack trace: %s" %(str(e), traceback.format_exc()))
-        hutil.do_exit(1, 'Install', 'error', '1', 'Install Failed.')
+        hutil.do_exit(1, 'Install', 'error', '1', "Failed to install DSC extension with error: {0} and stacktrace: {1}".format(str(e), traceback.format_exc()))
 
 def enable():
     hutil.do_parse_context('Enable')
@@ -403,8 +398,10 @@ def update():
 
 def run_cmd(cmd):
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, close_fds=True)
-    exit_code = proc.wait()
-    stdout, stderr = proc.communicate()
+    proc.wait()
+    exit_code = proc.returncode
+    stdout = proc.stdout.read()
+    stderr = proc.stderr.read()
     return exit_code, stdout, stderr
  
 def run_dpkg_cmd_with_retry(cmd):
@@ -593,7 +590,7 @@ def get_openssl_version():
         error_msg = 'This system does not have a supported version of OpenSSL installed. Supported version: 0.9.8*, 1.0.*'
         hutil.error(error_msg)
         waagent.AddExtensionEvent(name=ExtensionShortName, op='InstallInProgress', isSuccess=True, message="System doesn't have supported OpenSSL version:" + openssl_version)
-        hutil.do_exit(51, 'Install', 'error', '51', openssl_version + 'is not supported.')
+        hutil.do_exit(51, 'Install', 'error', '51', openssl_version + ' is not supported.')
         
 def start_omiservice():
     run_cmd('/opt/omi/bin/service_control start')
